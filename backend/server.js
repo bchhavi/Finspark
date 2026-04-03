@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -6,18 +7,20 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto'); // Built-in Node.js library for PII Masking
 const app = express();
-const PORT = 4000;
+const PORT = process.env.PORT || 4000;
 
 // 1. Middleware
 app.use(cors());
 app.use(bodyParser.json());
 
-const JWT_SECRET = "super_secret_hackathon_key_123";
+const JWT_SECRET = process.env.JWT_SECRET || "super_secret_hackathon_key_123";
 
 // 2. MongoDB Connection
-mongoose.connect('mongodb+srv://Chhavi_Bamoriya:6S1EIyEHV7r0AfmZ@cluster0.88yikej.mongodb.net/?appName=Cluster0/telemetry_db')
+
+mongoose.connect(process.env.MONGO_DB_URL) 
     .then(() => console.log("✅ Connected to MongoDB"))
     .catch(err => console.error("❌ MongoDB connection error:", err));
+
 
 // ==========================================
 // LIVE COMPLIANCE AUDIT COUNTERS
