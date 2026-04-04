@@ -6,6 +6,9 @@ const bodyParser = require('body-parser');
 const bcrypt = require('bcryptjs'); 
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto'); // Built-in Node.js library for PII Masking
+const fs = require('fs');         // NEW: For On-Premise Local Storage
+const path = require('path');     // NEW: For File Paths
+const ON_PREM_FILE = path.join(__dirname, 'onprem_local_storage.json');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -40,7 +43,10 @@ const eventSchema = new mongoose.Schema({
     session_id: String,      
     url: String,             
     timestamp: { type: Date, default: Date.now }, 
-    payload: Object          
+    payload: Object,
+    deployment_type: String,
+    region: String,
+    consent_given: Boolean
 });
 const TelemetryEvent = mongoose.model('Event', eventSchema);
 
@@ -144,14 +150,32 @@ app.post('/api/events', async (req, res) => {
         let maskedUserId = "anonymous";
         if (rawData.user_id) {
             maskedUserId = crypto.createHash('sha256').update(rawData.user_id).digest('hex');
-            complianceAudit.identitiesHashed++; // <-- NEW: TICK COUNTER
+            complianceAudit.identitiesHashed++; 
         }
 
         const compliantData = { ...rawData, user_id: maskedUserId };
-        const newEvent = new TelemetryEvent(compliantData);
-        await newEvent.save();
-        
-        res.status(201).json({ success: true, message: "Compliant event securely recorded" });
+
+        // ==========================================
+        // 🔀 DEPLOYMENT-AWARE ROUTING
+        // ==========================================
+        if (compliantData.deployment_type === 'on-premise') {
+            // 🏢 ON-PREMISE: Save to Local Disk (Air-gapped simulation)
+            let localStore = [];
+            if (fs.existsSync(ON_PREM_FILE)) {
+                const fileData = fs.readFileSync(ON_PREM_FILE, 'utf8');
+                if (fileData) localStore = JSON.parse(fileData);
+            }
+            localStore.push(compliantData);
+            fs.writeFileSync(ON_PREM_FILE, JSON.stringify(localStore, null, 2));
+            
+            return res.status(201).json({ success: true, message: "Event saved to Local Storage" });
+        } else {
+            // ☁️ CLOUD: Save to MongoDB Atlas
+            const newEvent = new TelemetryEvent(compliantData);
+            await newEvent.save();
+            return res.status(201).json({ success: true, message: "Event recorded in Cloud DB" });
+        }
+
     } catch (error) {
         res.status(500).json({ success: false, error: "Internal Server Error" });
     }
@@ -161,8 +185,16 @@ app.post('/api/events', async (req, res) => {
 app.delete('/api/admin/clear-telemetry', async (req, res) => {
     try {
         complianceAudit = { identitiesHashed: 0, gdprBlocked: 0, tenantBlocked: 0 };
+        
+        // 1. Clear Cloud DB
         await TelemetryEvent.deleteMany({});
-        res.json({ success: true, message: "Telemetry database wiped clean!" });
+        
+        // 2. Clear Local On-Prem File
+        if (fs.existsSync(ON_PREM_FILE)) {
+            fs.writeFileSync(ON_PREM_FILE, JSON.stringify([])); 
+        }
+
+        res.json({ success: true, message: "Cloud & Local databases wiped clean!" });
     } catch (error) {
         console.error("Failed to clear DB:", error);
         res.status(500).json({ success: false, message: "Database clear failed" });
@@ -174,7 +206,26 @@ app.delete('/api/admin/clear-telemetry', async (req, res) => {
 // ==========================================
 app.get('/api/admin/analytics', async (req, res) => {
     try {
-        const allEvents = await TelemetryEvent.find();
+        let allEvents = [];
+        const envFilter = req.query.env || 'all';
+
+        // 1. Get Cloud Data (from MongoDB)
+        if (envFilter === 'all' || envFilter === 'cloud') {
+            const cloudEvents = await TelemetryEvent.find();
+            // Convert mongoose documents to standard JS objects
+            allEvents = [...allEvents, ...cloudEvents.map(e => e.toObject())];
+        }
+
+        // 2. Get On-Prem Data (from Local JSON File)
+        if (envFilter === 'all' || envFilter === 'on-premise') {
+            if (fs.existsSync(ON_PREM_FILE)) {
+                const fileData = fs.readFileSync(ON_PREM_FILE, 'utf8');
+                if (fileData) {
+                    const localEvents = JSON.parse(fileData);
+                    allEvents = [...allEvents, ...localEvents];
+                }
+            }
+        }
 
         // --- A. BASIC MATH ---
         const funnelStarts = allEvents.filter(e => e.event_type === 'funnel_step' && e.payload?.step_name === 'personal_details' && e.payload?.action === 'enter').length;
