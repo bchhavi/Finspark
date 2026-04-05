@@ -4,6 +4,14 @@
 
 ---
 
+## 🌐 Live Demo
+
+🔗 **[https://finspark-frontend.onrender.com](https://finspark-frontend.onrender.com)**
+
+> ⚠️ **Note:** The app is hosted on Render's free tier. If it hasn't been visited recently, the server may be in a **cold sleep** state — the first load can take **30–60 seconds** to wake up. Please be patient; it will load!
+
+---
+
 ## 🌟 Core Architecture & Technical Highlights
 
 ### 1. 🔀 Deployment-Aware Federated Routing
